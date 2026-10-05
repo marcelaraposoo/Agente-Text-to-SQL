@@ -68,7 +68,7 @@ Pergunta ──► Cache? ──sim──► Resposta
 
 ### 2. Clonar e instalar
 ```bash
-git clone https://github.com/SEU_USUARIO/Agente-Text-to-SQL.git](https://github.com/marcelaraposoo/Agente-Text-to-SQL.git)
+git clone https://github.com/marcelaraposoo/Agente-Text-to-SQL.git
 cd Agente-Text-to-SQL
 
 python -m venv .venv
