@@ -56,7 +56,8 @@ class CineAgent:
             self.conn.set_progress_handler(None, 0)
 
     # ---- loop principal ----
-    def ask(self, question: str, use_cache: bool = True) -> Answer:
+    def ask(self, question: str, use_cache: bool = True, final_answer: bool = True) -> Answer:
+        """final_answer=False poupa a 2ª chamada ao LLM (a que redige a resposta): usado nos evals."""
         if use_cache and not self.history:
             hit = self.cache.get(question)
             if hit:
@@ -74,6 +75,7 @@ class CineAgent:
                 ans.text = msg.content or ""
                 break
             messages.append(msg.model_dump(exclude_none=True))
+            round_error = False
             for call in msg.tool_calls:
                 try:
                     query = json.loads(call.function.arguments).get("query", "")
@@ -83,11 +85,15 @@ class CineAgent:
                 ans.queries.append(query)
                 if "error" not in result:
                     ans.columns, ans.last_rows = result["columns"], result["rows"]
+                else:
+                    round_error = True
                 payload = dict(result)
                 if "rows" in payload:
                     payload["rows"] = payload["rows"][: self.s.max_rows_to_llm]
                 messages.append({"role": "tool", "tool_call_id": call.id,
                                  "content": json.dumps(payload, ensure_ascii=False, default=str)})
+            if not final_answer and not round_error:
+                break  # SQL executado com sucesso: não gasta outra chamada só para redigir o texto
         else:
             ans.text = "Não consegui chegar a uma resposta dentro do limite de tentativas. Tente reformular a pergunta."
 

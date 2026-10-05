@@ -5,7 +5,7 @@ Uso:
   python evals/run_evals.py --ids 1,2,3     # só algumas
   python evals/run_evals.py --pendentes     # só as que ainda não passaram (ou deram erro de API)
 
-Cada pergunta gasta ~2 requests. Passa se alguma coluna do resultado do agente reproduz,
+Por padrão cada pergunta gasta 1 request (só o SQL; --resposta-completa gasta 2). Passa se alguma coluna do resultado do agente reproduz,
 na mesma ordem, os valores da 1ª coluna do reference_sql (top-5 ou menos): tolera colunas
 extras, aliases e LIMIT diferentes. Erros de API (ex.: 503) NÃO derrubam o lote: a pergunta
 fica marcada como 'erro_api' e pode ser repetida com --pendentes.
@@ -41,11 +41,39 @@ def matches(ref_rows, got_rows, k: int = 5) -> bool:
     return False
 
 
+def _close(a, b) -> bool:
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return abs(a - b) <= 0.011
+    return a == b
+
+
+def matches_free(ref_rows, got_rows) -> bool:
+    """Para perguntas sem ordem definida: compara o MAPA chave -> valor, ignorando a ordem das linhas.
+    A chave é a 1ª coluna do reference_sql e o valor, a 2ª (se existir)."""
+    if not ref_rows or not got_rows:
+        return False
+    ref = {_n(r[0]): (_n(r[1]) if len(r) > 1 else None) for r in ref_rows}
+    for j in range(len(got_rows[0])):
+        if {_n(r[j]) for r in got_rows} != set(ref):
+            continue
+        if len(ref_rows[0]) < 2:
+            return True
+        for k in range(len(got_rows[0])):
+            if k != j:
+                got = {_n(r[j]): _n(r[k]) for r in got_rows}
+                if all(_close(got[key], ref[key]) for key in ref):
+                    return True
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ids", default="")
     ap.add_argument("--pendentes", action="store_true", help="só perguntas que ainda não passaram")
-    ap.add_argument("--pausa", type=float, default=4.0, help="segundos entre perguntas")
+    ap.add_argument("--pausa", type=float, default=13.0,
+                    help="segundos entre perguntas (o plano gratuito permite ~5 req/min)")
+    ap.add_argument("--resposta-completa", action="store_true",
+                    help="gasta a 2ª chamada para também redigir a resposta em texto")
     a = ap.parse_args()
 
     saved = json.loads(RESULTS.read_text("utf-8")) if RESULTS.exists() else {}
@@ -66,7 +94,7 @@ def main():
     for i, q in enumerate(qs):
         agent.history = []
         try:
-            ans = agent.ask(q["pergunta"], use_cache=False)
+            ans = agent.ask(q["pergunta"], use_cache=False, final_answer=a.resposta_completa)
         except LLMUnavailable as e:
             print(f"[{q['id']:>2}] ERRO API  {q['pergunta'][:55]}")
             print(f"      {' '.join(str(e).split())[:400]}")
@@ -83,13 +111,16 @@ def main():
         if q.get("esperado") == "recusa":
             passed = not ans.queries or not ans.last_rows
         else:
-            passed = matches(ref.execute(q["reference_sql"]).fetchall(), ans.last_rows)
+            ref_rows = ref.execute(q["reference_sql"]).fetchall()
+            check = matches_free if q.get("ordem") == "livre" else matches
+            passed = check(ref_rows, ans.last_rows)
         print(f"[{q['id']:>2}] {'OK    ' if passed else 'FALHOU'}  {q['pergunta'][:55]}  ({ans.model})")
         if not passed and ans.queries:
             print("      SQL do agente:", ans.queries[-1][:300].replace("\n", " "))
         saved[str(q["id"])] = {
             "pergunta": q["pergunta"], "status": "ok" if passed else "falhou", "modelo": ans.model,
             "sql": ans.queries[-1] if ans.queries else "", "resposta": ans.text,
+            "amostra": [[str(v) for v in r] for r in ans.last_rows[:3]],
         }
         RESULTS.write_text(json.dumps(saved, ensure_ascii=False, indent=2), "utf-8")
         if i < len(qs) - 1:

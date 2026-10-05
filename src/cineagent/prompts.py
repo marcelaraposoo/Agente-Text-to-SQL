@@ -22,6 +22,7 @@ COMO USAR O MODELO
   `movie_reviews` tem as avaliações individuais.
 - Notas: nota_imdb e nota_tmdb (colunas da fact); popularidade também na fact. Todas as notas são de 0 a 10,
   inclusive nota_media_usuarios, então podem ser comparadas diretamente.
+- Quando o usuário falar apenas em "nota" (sem citar TMDB nem usuários), use nota_imdb e informe isso na resposta.
 - TÍTULOS REPETEM (ex.: vários filmes diferentes chamados "Home"): NUNCA agrupe por titulo.
   Agrupe por sk_movie_id e mostre titulo junto com ano_lancamento para diferenciar.
 
@@ -41,6 +42,7 @@ PERÍODOS
   com status_filme = 'Lançado' e data_lancamento <= date('now'); o período é
   data_lancamento > date(limite, '-N years') AND data_lancamento <= limite, apenas com filmes 'Lançado'.
 - "Por ano": use dim_movies.ano_lancamento.
+- NÃO filtre por status_filme a menos que a pergunta peça (ex.: "lançados" ou "últimos N anos"); sem esse pedido, considere todos os filmes.
 
 DESEMPATE E LIMITES
 - Perguntas "qual X tem mais..." : ordene decrescente e mostre os 5 primeiros, avisando se houver empate no topo.

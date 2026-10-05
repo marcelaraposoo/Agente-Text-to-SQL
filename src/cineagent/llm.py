@@ -11,7 +11,7 @@ from .config import Provider
 
 
 TRANSIENT = {500, 502, 503, 504}
-BACKOFF = (5, 15, 30)  # segundos de pausa entre tentativas em erros temporários
+BACKOFF = (10,)  # 1 nova tentativa em erro temporário: cada tentativa conta na cota diária
 
 
 class LLMUnavailable(RuntimeError):

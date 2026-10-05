@@ -28,7 +28,7 @@ def build_providers() -> list[Provider]:
     """Provedores na ordem de LLM_PROVIDERS; só entram os que têm chave. A ordem é o fallback."""
     catalog = {
         "gemini": Provider("gemini", GEMINI_URL, os.getenv("GEMINI_API_KEY", ""),
-                           _split(os.getenv("GEMINI_MODELS", "gemini-2.5-flash"))),
+                           _split(os.getenv("GEMINI_MODELS", "gemini-3.5-flash-lite,gemini-3.5-flash"))),
         "openrouter": Provider("openrouter", OPENROUTER_URL, os.getenv("OPENROUTER_API_KEY", ""),
                                _split(os.getenv("OPENROUTER_MODELS", OPENROUTER_DEFAULT_MODELS))),
     }

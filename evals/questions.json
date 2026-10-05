@@ -27,13 +27,14 @@
     "id": 5,
     "categoria": "popularidade",
     "pergunta": "Filmes com maior divergência entre a nota TMDB e a nota IMDb",
-    "reference_sql": "SELECT m.titulo, ABS(f.nota_tmdb - f.nota_imdb) AS divergencia FROM fact_movies_performance f JOIN dim_movies m ON m.sk_movie_id=f.sk_movie_id WHERE f.nota_tmdb > 0 AND f.nota_imdb > 0 ORDER BY divergencia DESC LIMIT 10"
+    "reference_sql": "SELECT m.titulo, ABS(f.nota_tmdb - f.nota_imdb) AS divergencia FROM fact_movies_performance f JOIN dim_movies m ON m.sk_movie_id=f.sk_movie_id WHERE f.nota_tmdb > 0 AND f.nota_imdb > 0 ORDER BY divergencia DESC, m.titulo LIMIT 10"
   },
   {
     "id": 6,
     "categoria": "popularidade",
     "pergunta": "Nota média IMDb por ano de lançamento",
-    "reference_sql": "SELECT m.ano_lancamento, AVG(f.nota_imdb) AS nota_media_imdb FROM fact_movies_performance f JOIN dim_movies m ON m.sk_movie_id=f.sk_movie_id WHERE f.nota_imdb > 0 AND m.ano_lancamento IS NOT NULL GROUP BY m.ano_lancamento ORDER BY m.ano_lancamento"
+    "reference_sql": "SELECT m.ano_lancamento, AVG(f.nota_imdb) AS nota_media_imdb FROM fact_movies_performance f JOIN dim_movies m ON m.sk_movie_id=f.sk_movie_id WHERE f.nota_imdb > 0 AND m.ano_lancamento IS NOT NULL GROUP BY m.ano_lancamento ORDER BY m.ano_lancamento",
+    "ordem": "livre"
   },
   {
     "id": 7,
@@ -45,7 +46,7 @@
     "id": 8,
     "categoria": "elenco",
     "pergunta": "Diretores com maior nota média (mínimo de 5 filmes)",
-    "reference_sql": "SELECT p.nome_pessoa, AVG(f.nota_imdb) AS nota_media, COUNT(DISTINCT bp.sk_movie_id) AS qtd_filmes FROM bridge_movie_person bp JOIN dim_people p ON p.sk_person_id=bp.sk_person_id AND p.tipo_pessoa='Diretor' JOIN fact_movies_performance f ON f.sk_movie_id=bp.sk_movie_id WHERE f.nota_imdb > 0 GROUP BY p.sk_person_id, p.nome_pessoa HAVING COUNT(DISTINCT bp.sk_movie_id) >= 5 ORDER BY nota_media DESC LIMIT 10"
+    "reference_sql": "SELECT p.nome_pessoa, AVG(f.nota_imdb) AS nota_media, COUNT(DISTINCT bp.sk_movie_id) AS qtd_filmes FROM bridge_movie_person bp JOIN dim_people p ON p.sk_person_id=bp.sk_person_id AND p.tipo_pessoa='Diretor' JOIN fact_movies_performance f ON f.sk_movie_id=bp.sk_movie_id WHERE f.nota_imdb > 0 GROUP BY p.sk_person_id, p.nome_pessoa HAVING COUNT(DISTINCT bp.sk_movie_id) >= 5 ORDER BY nota_media DESC, p.nome_pessoa LIMIT 10"
   },
   {
     "id": 9,

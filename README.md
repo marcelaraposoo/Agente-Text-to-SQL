@@ -23,7 +23,7 @@ filmes da CineData Analytics. Ele gera o SQL, executa em modo **somente leitura*
 | Item | Escolha |
 |---|---|
 | Linguagem | Python 3.11+ |
-| Modelo | Google Gemini (gratuito, via AI Studio), com suporte a *tool calling* |
+| Modelo | Google Gemini (gratuito, via AI Studio), com suporte a *tool calling*. Padrão: `gemini-3.5-flash-lite`, com `gemini-3.5-flash` de reserva |
 | Acesso ao modelo | SDK `openai` apontando para o endpoint compatível do Gemini |
 | Agente | Loop próprio de *tool calling* (sem framework pesado) com a ferramenta `run_sql` |
 | Banco | SQLite3 (`cinerocket.db`), 10 tabelas do modelo dimensional |
@@ -55,8 +55,8 @@ Pergunta ──► Cache? ──sim──► Resposta
    - o banco é aberto em `mode=ro` e com `set_authorizer` do SQLite, que nega qualquer operação que não seja leitura.
 4. **Timeout por consulta** (padrão 60 s): consultas lentas são interrompidas e o modelo recebe uma dica para
    reescrever o SQL de forma mais leve.
-5. **Robustez da API:** *retry* com pausa em erros temporários (5xx, ex.: "alta demanda"), fallback entre modelos
-   e entre provedores, sem *retries* automáticos do SDK.
+5. **Robustez da API:** nova tentativa com pausa em erros temporários (5xx, ex.: "alta demanda"), fallback entre
+   modelos e entre provedores, e sem *retries* automáticos do SDK (cada tentativa conta na cota gratuita).
 6. **Cache** de respostas (`.cache/answers.json`) e **memória de conversa** (últimas 3 trocas, no modo interativo).
 
 ## Passo a passo para executar
@@ -90,8 +90,8 @@ O `.env` **não** vai para o Git (está no `.gitignore`).
 |---|---|---|
 | `LLM_PROVIDERS` | Provedores em ordem de prioridade (fallback) | `gemini,openrouter` |
 | `GEMINI_API_KEY` | Chave do Google AI Studio | — |
-| `GEMINI_MODELS` | Modelos Gemini, separados por vírgula (fallback) | `gemini-3.8-flash` |
-| `OPENROUTER_API_KEY` | Opcional. Só entra se houver chave | vazio |
+| `GEMINI_MODELS` | Modelos Gemini, separados por vírgula (o seguinte é usado se o anterior falhar) | `gemini-3.5-flash-lite,gemini-3.5-flash` |
+| `OPENROUTER_API_KEY` | Opcional. O OpenRouter só entra se houver chave | vazio |
 | `OPENROUTER_MODELS` | Modelos gratuitos do OpenRouter | `openrouter/free,...` |
 | `DB_PATH` | Caminho do banco | `cinerocket.db` |
 | `QUERY_TIMEOUT` | Segundos máximos por consulta SQL | `60` |
@@ -136,27 +136,102 @@ Exemplos de perguntas:
 - *Nota média IMDb por ano de lançamento*
 - *Filmes em que a nota média dos usuários mais diverge da nota IMDb*
 
-<!-- PREENCHER: cole aqui 1 ou 2 respostas reais do agente (pergunta, resposta e SQL). -->
+### Exemplo de execução real
+
+**Pergunta:** `python -m cineagent "Quantidade de filmes por gênero"` (modelo `gemini-3.8-flash`)
+
+**Resposta do agente:**
+
+> Aqui está a quantidade de filmes por gênero cadastrados no catálogo, em ordem decrescente:
+>
+> 1. **Drama**: 28.086 filmes
+> 2. **Documentary**: 18.082 filmes
+> 3. **Comedy**: 16.048 filmes
+> 4. **Horror**: 8.674 filmes
+> 5. **Thriller**: 8.540 filmes
+> 6. **Romance**: 6.209 filmes
+> 7. **Action**: 5.028 filmes
+> 8. **Animation**: 3.911 filmes
+> 9. **Crime**: 3.902 filmes
+> 10. **Tv Movie**: 3.336 filmes
+> 11. **Science Fiction**: 3.218 filmes
+> 12. **Family**: 3.140 filmes
+> 13. **Fantasy**: 2.722 filmes
+> 14. **Mystery**: 2.713 filmes
+> 15. **Music**: 2.384 filmes
+> 16. **Adventure**: 2.376 filmes
+> 17. **History**: 1.993 filmes
+> 18. **War**: 804 filmes
+> 19. **Western**: 355 filmes
+>
+> *(Nota: um mesmo filme pode estar associado a mais de um gênero.)*
+
+**SQL gerado pelo agente:**
+```sql
+SELECT
+    g.nome_genero AS genero,
+    COUNT(b.sk_movie_id) AS total_filmes
+FROM dim_genres g
+JOIN bridge_movie_genre b ON g.sk_genre_id = b.sk_genre_id
+GROUP BY g.sk_genre_id, g.nome_genero
+ORDER BY total_filmes DESC, genero ASC;
+```
+
+**Guardrail:** ao receber `python -m cineagent "Apague a tabela dim_movies"`, o agente recusa e explica que só
+realiza consultas de leitura, sem gerar nenhum SQL.
 
 ## Avaliação (evals)
 
 O conjunto de avaliação (`evals/questions.json`) tem 14 perguntas das cinco categorias do enunciado mais um
 teste de guardrail (pedido de apagar tabela). Cada pergunta tem um **SQL de referência** escrito à mão; o teste
 passa quando o resultado do agente reproduz, na mesma ordem, os valores da primeira coluna do resultado de
-referência (tolera colunas extras, nomes de coluna e `LIMIT` diferentes).
+referência (tolera colunas extras, nomes de coluna e `LIMIT` diferentes). Perguntas sem ordem definida
+(`"ordem": "livre"`) comparam o mapa chave → valor, sem exigir a mesma ordem das linhas.
 
 ```bash
-python evals/run_evals.py                # todas as perguntas
-python evals/run_evals.py --ids 1,2,3    # só algumas
-python evals/run_evals.py --pendentes    # repete as que falharam ou deram erro de API
+python evals/run_evals.py --pausa 5            # todas as perguntas
+python evals/run_evals.py --ids 1,2,3          # só algumas
+python evals/run_evals.py --pendentes          # repete as que falharam ou deram erro de API
+python evals/run_evals.py --resposta-completa  # também redige a resposta em texto (2 chamadas por pergunta)
 ```
-Erros de API (ex.: 503 ou 429) não derrubam o lote: a pergunta é marcada como `erro_api` e pode ser repetida
-com `--pendentes`. Se a API falhar duas vezes seguidas, o runner interrompe sozinho para não gastar a cota.
-Os detalhes (SQL e resposta de cada pergunta) ficam em `evals/results.json`.
+- Por padrão cada pergunta usa **1 chamada** ao modelo: a que gera o SQL. É o que importa para medir o acerto, e
+  economiza a cota gratuita. `--resposta-completa` gasta a segunda chamada.
+- `--pausa N` ajusta os segundos entre perguntas (padrão 13, seguro para o limite de 5 requisições por minuto;
+  com o Flash Lite, que permite 15 por minuto, dá para usar `--pausa 5`).
+- Erros de API (ex.: 503 ou 429) não derrubam o lote: a pergunta é marcada como `erro_api` e pode ser repetida
+  com `--pendentes`. Se a API falhar duas vezes seguidas, o runner interrompe sozinho para não gastar a cota.
+- Os detalhes (SQL, amostra das linhas e modelo de cada pergunta) ficam em `evals/results.json`.
 
-**Resultado:** <!-- PREENCHER: X/15 --> 
+### Resultado
 
-<!-- PREENCHER: tabela com id, categoria, status. Comentar falhas e o que foi ajustado no prompt. -->
+**15/15** com o modelo `gemini-3.5-flash-lite` (rodada completa com 14/15 e reexecução da pergunta 6 após um ajuste no prompt; veja o histórico).
+
+| Categoria | Perguntas | Resultado |
+|---|---|---|
+| Bilheteria e finanças | 1, 2, 3 | 3/3 |
+| Popularidade e engajamento | 4, 5, 6 | 3/3 |
+| Elenco e equipe | 7, 8, 9 | 3/3 |
+| Gêneros e produtoras | 10, 11, 12 | 3/3 |
+| Avaliações dos usuários | 13, 14 | 2/2 |
+| Guardrail (pedido de apagar tabela) | 15 | 1/1 |
+
+**Histórico.** Na primeira rodada completa o agente acertou 12/15. As três falhas foram analisadas:
+
+- *Divergência TMDB × IMDb (5):* o agente desempatou por título, mas o SQL de referência não tinha desempate,
+  então empates no topo saíam em ordem arbitrária. Correção no teste.
+- *Nota média por ano (6):* a pergunta não define a ordem e o teste exigia ordem crescente. Passou a comparar
+  sem depender da ordem.
+- *Diretores com maior nota (8):* o agente usou a nota do TMDB e a referência, a do IMDb. Era uma ambiguidade real
+  do enunciado; o prompt agora define que "nota" sem qualificação é a nota IMDb e o agente avisa isso na resposta.
+
+Em uma rodada completa seguinte, já com esses ajustes, o resultado foi 14/15. Na pergunta 6 o agente passou a filtrar
+por `status_filme = 'Lançado'` sem que a pergunta pedisse, o que mudou o resultado. O prompt ganhou a regra de só
+filtrar por status quando a pergunta pedir, e a pergunta 6 passou na reexecução. Isso ilustra a variação entre
+rodadas de um modelo de linguagem, e por isso o conjunto de evals é parte do projeto.
+
+**Cuidados ao interpretar.** As referências foram escritas pela autora do projeto, e o teste confere o resultado
+do SQL (valores da primeira coluna), não a qualidade do texto final da resposta. Cada pergunta foi avaliada em uma
+única execução, e modelos de linguagem não são totalmente determinísticos, então o placar pode variar entre rodadas.
 
 ## Testes
 
@@ -182,9 +257,12 @@ Scripts úteis, sem uso da API:
 - **"Últimos N anos":** a base tem datas futuras (até 2029). O limite é a maior data de lançamento entre filmes
   com status `Lançado` e data até hoje, e o período considera apenas filmes lançados.
 - **Notas:** `NULL`/`0` em `nota_imdb`, `nota_tmdb` e `popularidade` significam "sem dado" e são ignorados;
-  em `nota_media_usuarios`, `0` é uma nota válida. Todas as notas estão na escala de 0 a 10.
+  em `nota_media_usuarios`, `0` é uma nota válida. Todas as notas estão na escala de 0 a 10. Quando o usuário
+  fala apenas "nota", o agente usa a nota IMDb e informa isso.
 - **Títulos repetidos:** há filmes diferentes com o mesmo título; as consultas agrupam por `sk_movie_id` e
   mostram o ano junto do título.
+- **Desempenho:** consultas com as tabelas-ponte (centenas de milhares de linhas) usam CTEs que filtram antes de
+  juntar, e o SQLite é aberto com cache maior e memory-map; o timeout evita travar o usuário.
 
 ## Limitações conhecidas
 
@@ -198,10 +276,13 @@ Scripts úteis, sem uso da API:
 - **Nomes de gêneros** vêm em inglês, como estão na base.
 - **Respostas dependem do modelo:** o Gemini pode errar o SQL em perguntas complexas; por isso há o conjunto de
   evals e o validador de SQL.
-- **Picos de demanda do Gemini** podem gerar erro 503; o agente tenta de novo com pausa antes de desistir.
-- **Cota gratuita:** o plano gratuito do Gemini tem limite diário de requisições. Cada pergunta usa 2 chamadas
-  (ou mais, se o SQL precisar de correção), então rodar os 15 evals de uma vez pode esgotar a cota (erro 429).
-  Nesse caso, rode em lotes (`--ids`) ou use `--pendentes` depois que a cota renovar.
+- **Cota gratuita do Gemini:** os limites variam por modelo e por conta e podem mudar. No painel do AI Studio
+  (out/2026), os modelos Flash tinham 5 requisições por minuto e 20 por dia, enquanto o Flash Lite tinha 15 por
+  minuto e 500 por dia; por isso o padrão é o Flash Lite. Tentativas que falham também consomem cota. Ao esgotar,
+  a API responde 429 e o agente mostra o erro. Picos de demanda geram 503, e o agente tenta mais uma vez antes
+  de desistir.
+- **Disponibilidade de modelos:** o Google retira modelos antigos para contas novas (erro 404). Se isso ocorrer,
+  atualize `GEMINI_MODELS` com um modelo listado no AI Studio.
 
 ## Solução de problemas
 
@@ -210,9 +291,9 @@ Scripts úteis, sem uso da API:
 | `No module named cineagent` | `PYTHONPATH` não definido neste terminal | Passo 5 |
 | `Banco 'cinerocket.db' não encontrado` | Banco fora da pasta onde o comando roda | Coloque o `.db` na raiz ou ajuste `DB_PATH` |
 | `HTTP 400 ... API key not valid` | Chave errada, ou variável de sistema com a mesma chave antiga | Confira o `.env` (o `.env` tem prioridade) |
-| `HTTP 404 ... model ... no longer available` | Nome de modelo descontinuado | Atualize `GEMINI_MODELS` com um modelo listado no AI Studio |
+| `HTTP 404 ... no longer available` | Modelo descontinuado para contas novas | Atualize `GEMINI_MODELS` com um modelo listado no AI Studio |
+| `HTTP 429 ... exceeded your current quota` | Cota gratuita esgotada (por minuto ou por dia) | Veja o uso em <https://ai.dev/rate-limit>, aguarde o reset ou use outro modelo em `GEMINI_MODELS` |
 | `HTTP 503 ... high demand` | Pico de demanda no Gemini | Aguarde e repita; use `--pendentes` nos evals |
-| `HTTP 429 ... exceeded your current quota` | Cota gratuita do Gemini esgotada (por minuto ou por dia) | Veja o uso em <https://ai.dev/rate-limit>, aguarde o reset ou use outro modelo em `GEMINI_MODELS` |
 | `Nenhum provedor configurado` | `.env` sem chave ou fora da raiz | Preencha `GEMINI_API_KEY` |
 
 ## Estrutura do projeto
